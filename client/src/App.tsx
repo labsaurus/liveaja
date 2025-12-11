@@ -142,10 +142,14 @@ function App() {
             </p>
             <form onSubmit={handleImport}>
               <div className="form-group">
-                <label>Google Drive Share Link</label>
-                <input name="url" placeholder="https://drive.google.com/file/d/..." required />
+                <label>Google Drive File ID</label>
+                <input name="url" placeholder="e.g. 1VqYtwEElyceBUgZf1_Nfc2zIpkQccKVX" required />
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#94a3b8' }}>
+                Paste ONLY the File ID, not the full link.<br />
+                Example: <code>1VqYtwEElyceBUgZf1_Nfc2zIpkQccKVX</code>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
                 <button type="button" className="btn" onClick={() => setImportTargetId(null)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Import & Download</button>
               </div>
