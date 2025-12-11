@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { spawn } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
 
@@ -7,88 +7,83 @@ fs.ensureDirSync(STORAGE_DIR);
 
 export class DownloaderService {
     /**
-     * Downloads a file from a URL and saves it to the storage directory.
-     * Returns the local file path.
-     */
-    async downloadFile(url: string, filename: string): Promise<string> {
+     * Downloads a file from GDrive using system 'curl'.
+     * Requires 'curl' to be installed on the system.
+     * Input: GDrive File ID (not URL)
+      */
+    async downloadFile(fileId: string, filename: string): Promise<string> {
         const filePath = path.join(STORAGE_DIR, filename);
-        const writer = fs.createWriteStream(filePath);
+        const cookiePath = path.join(STORAGE_DIR, `cookie_${Date.now()}.txt`);
 
-        // Convert GDrive View URL to Download URL (Basic heuristic)
-        // https://drive.google.com/file/d/FILE_ID/view -> https://drive.google.com/uc?export=download&id=FILE_ID
-        // Standard GDrive Download URL
-        // Initialize downloadUrl with the original url
-        let downloadUrl = url;
+        // Remove old file if exists
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-        const gdriveMatch = url.match(/\/file\/d\/([^/]+)/);
-        let fileId = '';
-        if (gdriveMatch && gdriveMatch[1]) {
-            fileId = gdriveMatch[1];
-            downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-        }
+        console.log(`Starting download for File ID: ${fileId} using Curl...`);
 
-        try {
-            let response = await axios({
-                url: downloadUrl,
-                method: 'GET',
-                responseType: 'stream', // Start as stream, but we might read it if it's HTML
-                validateStatus: (status) => status < 400
-            });
+        return new Promise((resolve, reject) => {
+            // Step 1: Request to get cookie and potentially check for confirm token
+            // We use curl to fetch the page content and save cookies
+            const phase1 = spawn('curl', [
+                '-s', // Silent
+                '-c', cookiePath, // Save jar
+                '-L', // Follow redirects
+                `https://drive.google.com/uc?export=download&id=${fileId}`
+            ]);
 
-            // Check content type
-            const contentType = response.headers['content-type'];
+            let outputData = '';
+            phase1.stdout.on('data', (data) => { outputData += data.toString(); });
 
-            if (contentType && contentType.includes('text/html')) {
-                // It's likely the virus scan warning. We need to parse the HTML to find the confirmation link/token.
-                // We need to convert the stream to text to parse it.
-                const html = await streamToString(response.data);
-
-                // Look for: href="/uc?export=download&id=FILE_ID&confirm=XXXX"
-                // Regex to find 'confirm' query param
-                const confirmMatch = html.match(/confirm=([a-zA-Z0-9_-]+)/);
-
-                if (confirmMatch && confirmMatch[1]) {
-                    const confirmCode = confirmMatch[1];
-                    console.log(`GDrive Virus Warning detected. Retrying with confirm code: ${confirmCode}`);
-
-                    const newUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=${confirmCode}`;
-
-                    response = await axios({
-                        url: newUrl,
-                        method: 'GET',
-                        responseType: 'stream',
-                        validateStatus: (status) => status < 400
-                    });
-                } else {
-                    console.error('GDrive HTML received but no confirm code found.');
-                    // It might be a private file or 404 page disguised as 200
-                    throw new Error('GDrive file is not directly downloadable. Ensure it is Public and not restricted.');
+            phase1.on('close', (code) => {
+                if (code !== 0) {
+                    return reject(new Error('Curl phase 1 failed'));
                 }
-            }
 
-            response.data.pipe(writer);
+                // Step 2: Check for 'confirm' token in the output
+                // HTML response might contain: href="/uc?export=download&id=xxx&confirm=yyy"
+                const confirmMatch = outputData.match(/confirm=([a-zA-Z0-9_-]+)/);
+                const confirmToken = confirmMatch ? confirmMatch[1] : null;
 
-            return new Promise((resolve, reject) => {
-                writer.on('finish', () => resolve(filePath));
-                writer.on('error', reject);
+                let finalUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+                if (confirmToken) {
+                    console.log(`GDrive Large File detected. Confirm token found: ${confirmToken}`);
+                    finalUrl += `&confirm=${confirmToken}`;
+                }
+
+                console.log(`Phase 2: Downloading binary...`);
+
+                // Step 3: Download binary using the cookie
+                const phase2 = spawn('curl', [
+                    '-L',
+                    '-b', cookiePath, // Load cookies
+                    '-o', filePath,
+                    finalUrl
+                ]);
+
+                // Optional: Pipe progress to console?
+                // phase2.stderr.pipe(process.stderr);
+
+                phase2.on('close', (code2) => {
+                    // Cleanup cookie
+                    if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+
+                    if (code2 === 0) {
+                        // Verify file size > 0
+                        const stats = fs.statSync(filePath);
+                        if (stats.size === 0) {
+                            reject(new Error('Download resulted in empty file. Check File ID/Permissions.'));
+                        } else {
+                            console.log(`Download success: ${filePath} (${stats.size} bytes)`);
+                            resolve(filePath);
+                        }
+                    } else {
+                        reject(new Error(`Curl download failed with code ${code2}`));
+                    }
+                });
             });
-        } catch (error: any) {
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-            throw new Error(`Download failed: ${error.message}`);
-        }
+
+            phase1.on('error', (err) => reject(err));
+        });
     }
 }
 
-// Helper to read stream to string (for HTML parsing)
-function streamToString(stream: any): Promise<string> {
-    const chunks: any[] = [];
-    return new Promise((resolve, reject) => {
-        stream.on('data', (chunk: any) => chunks.push(Buffer.from(chunk)));
-        stream.on('error', (err: any) => reject(err));
-        stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    });
-}
-
-
 export const downloader = new DownloaderService();
-
