@@ -21,6 +21,8 @@ export function initDB() {
       looping_enabled INTEGER DEFAULT 1,
       download_status TEXT DEFAULT 'IDLE', -- IDLE, DOWNLOADING, READY, ERROR
       last_error TEXT,
+      schedule_start_time TEXT, -- HH:MM
+      schedule_stop_time TEXT, -- HH:MM
       is_active INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )

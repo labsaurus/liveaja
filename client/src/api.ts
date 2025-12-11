@@ -49,3 +49,8 @@ export const stopStream = async (id: number) => {
 export const importVideo = async (id: number, url: string) => {
     await api.post(`/channels/${id}/import-video`, { url });
 };
+
+export const getLogs = async (id: number) => {
+    const res = await api.get<string[]>(`/channels/${id}/logs`);
+    return res.data;
+};

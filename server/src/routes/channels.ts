@@ -129,4 +129,15 @@ router.post('/:id/stop', (req, res) => {
     }
 });
 
+// Get logs
+router.get('/:id/logs', (req, res) => {
+    const { id } = req.params;
+    try {
+        const logs = streamManager.getLogs(Number(id));
+        res.json(logs);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 export default router;
