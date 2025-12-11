@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Testing
+coverage
+
+# Production
+dist
+build
+
+# Misc
+.DS_Store
+.env
+.npm
+*.log
+
+# Project Specific
+server/data/*.sqlite
+server/data/*.sqlite-journal
+server/storage/*
+!server/storage/.gitkeep
