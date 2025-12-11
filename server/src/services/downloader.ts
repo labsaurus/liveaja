@@ -23,11 +23,22 @@ export class DownloaderService {
         }
 
         try {
-            const response = await axios({
+            let response = await axios({
                 url: downloadUrl,
                 method: 'GET',
                 responseType: 'stream',
+                validateStatus: (status) => status < 400
             });
+
+            // Check for GDrive Virus Scan Warning (HTML response instead of binary)
+            const contentType = response.headers['content-type'];
+            if (contentType && contentType.includes('text/html')) {
+                // Simple heuristic: Try to find the 'confirm' token in the cookie or link if possible, 
+                // but robustly parsing the confirmation page is complex.
+                // For now, we'll throw a clear error.
+                console.error('Download returned HTML. Likely GDrive Virus Scan Warning.');
+                throw new Error('GDrive download failed. File might be too large (virus scan warning) or not public. Use a direct link or smaller file.');
+            }
 
             response.data.pipe(writer);
 
@@ -35,10 +46,13 @@ export class DownloaderService {
                 writer.on('finish', () => resolve(filePath));
                 writer.on('error', reject);
             });
-        } catch (error) {
-            throw new Error(`Download failed: ${error}`);
+        } catch (error: any) {
+            // Clean up empty/corrupt file
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            throw new Error(`Download failed: ${error.message}`);
         }
     }
 }
 
 export const downloader = new DownloaderService();
+
