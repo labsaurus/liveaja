@@ -17,6 +17,9 @@ export class DownloaderService {
         // Convert GDrive View URL to Download URL (Basic heuristic)
         // https://drive.google.com/file/d/FILE_ID/view -> https://drive.google.com/uc?export=download&id=FILE_ID
         // Standard GDrive Download URL
+        // Initialize downloadUrl with the original url
+        let downloadUrl = url;
+
         const gdriveMatch = url.match(/\/file\/d\/([^/]+)/);
         let fileId = '';
         if (gdriveMatch && gdriveMatch[1]) {
