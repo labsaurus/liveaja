@@ -16,10 +16,13 @@ export class DownloaderService {
 
         // Convert GDrive View URL to Download URL (Basic heuristic)
         // https://drive.google.com/file/d/FILE_ID/view -> https://drive.google.com/uc?export=download&id=FILE_ID
+        // User reference script logic:
+        // drive_url_download="https://drive.usercontent.google.com/download?id=$file_id&export=download"
         let downloadUrl = url;
         const gdriveMatch = url.match(/\/file\/d\/([^/]+)/);
         if (gdriveMatch && gdriveMatch[1]) {
-            downloadUrl = `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
+            const fileId = gdriveMatch[1];
+            downloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
         }
 
         try {
