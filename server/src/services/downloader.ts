@@ -28,16 +28,30 @@ export class DownloaderService {
         // However, we'll trust the user's "Robust" strategy for now.
 
         const command = `
-            # 1. Get Confirm Token & Cookie
-            # output of first curl is piped to grep. If it's binary, grep handles it (might say binary file matches).
-            # We look for confirm=xxxx
-            CONFIRM_TOKEN=$(curl -sL -c "${cookiePath}" "https://drive.google.com/uc?export=download&id=${fileId}" | grep -o 'confirm=[a-zA-Z0-9_]*' | head -n 1 | cut -d '=' -f 2)
-            
-            # 2. Download with Token (if any) and Cookie
-            # If CONFIRM_TOKEN is empty, it just downloads without &confirm= (which works for small files usually)
-            curl -L -b "${cookiePath}" "https://drive.google.com/uc?export=download&confirm=$CONFIRM_TOKEN&id=${fileId}" -o "${filePath}"
-            
-            # 3. Cleanup
+            # Strategy 1: Direct Download via UserContent (matches user's successful script)
+            echo "Attempting Direct Download from drive.usercontent.google.com..."
+            curl -sL -b "${cookiePath}" -c "${cookiePath}" "https://drive.usercontent.google.com/download?id=${fileId}&export=download" -o "${filePath}"
+
+            # Check if it is HTML (Virus Warning)
+            if file -b --mime-type "${filePath}" | grep -q "text/html"; then
+                echo "Direct download received HTML (likely warning). Switching to Confirm Token Strategy..."
+                
+                # Strategy 2: Get Confirm Token from generic UC URL
+                # 1. Fetch warning page to get token
+                CONFIRM_TOKEN=$(curl -sL -c "${cookiePath}" "https://drive.google.com/uc?export=download&id=${fileId}" | grep -oE 'confirm=[a-zA-Z0-9_]+' | head -n 1 | cut -d '=' -f 2)
+                
+                if [ -z "$CONFIRM_TOKEN" ]; then
+                    # Fallback token
+                    echo "No token found. Using default 't'..."
+                    CONFIRM_TOKEN="t"
+                fi
+
+                # 2. Download with confirm token
+                echo "Downloading with confirm token: $CONFIRM_TOKEN"
+                curl -L -b "${cookiePath}" "https://drive.google.com/uc?export=download&confirm=$CONFIRM_TOKEN&id=${fileId}" -o "${filePath}"
+            fi
+
+            # Cleanup
             rm -f "${cookiePath}"
         `;
 
