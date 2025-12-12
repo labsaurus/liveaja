@@ -55,18 +55,15 @@ export class StreamManager {
 
         const cmd = ffmpeg(channel.video_source_path)
             .inputOptions([
-                '-re', // Read input at native frame rate (important for streaming static file)
-                '-stream_loop', '-1' // Loop infinitely at input level
+                '-re', // Read input at native frame rate
+                '-stream_loop', '-1' // Loop infinitely
             ])
-            .videoCodec('libx264')
-            .audioCodec('aac')
+            .videoCodec('copy')
+            .audioCodec('copy')
             .format('flv')
             .outputOptions([
-                '-preset', 'veryfast',
-                '-g', '60', // Keyframe interval (2s for 30fps)
-                '-b:v', '3000k',
-                '-bufsize', '6000k',
-                '-maxrate', '3000k'
+                // '-bsf:v', 'h264_mp4toannexb', // Sometimes needed for mp4->flv, but lets try clean copy first matching user script
+                // No re-encoding options needed for copy mode
             ])
             .output(rtmpEntry)
             .on('start', (commandLine) => {
