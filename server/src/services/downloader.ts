@@ -13,80 +13,36 @@ export class DownloaderService {
       */
     async downloadFile(fileId: string, filename: string): Promise<string> {
         const filePath = path.join(STORAGE_DIR, filename);
-        // Use /tmp for cookies to avoid cluttering storage, or use STORAGE_DIR for safety
-        const cookiePath = path.join(STORAGE_DIR, `gdrive_cookie_${fileId}_${Date.now()}.txt`);
-
         // Remove old file if exists
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-        console.log(`Starting Robust Shell Download for File ID: ${fileId}...`);
+        const scriptPath = path.join(__dirname, '../scripts/download.sh');
 
-        // Construct the shell command exactly as requested but with proper paths
-        // We use a safe delimiter for the shell command or just execute it as a big string.
-        // Note: We mute stdout of the first curl slightly to avoid binary dumping if it works directly?
-        // User's script piping to grep is fine for text, but might be heavy for binary.
-        // However, we'll trust the user's "Robust" strategy for now.
+        // Ensure script is executable
+        try {
+            fs.chmodSync(scriptPath, '755');
+        } catch (e) {
+            console.warn('Failed to chmod script:', e);
+        }
 
-        const command = `
-            # Strategy 1: Direct Download via UserContent (matches user's successful script)
-            echo "Attempting Direct Download from drive.usercontent.google.com..."
-            curl -sL -b "${cookiePath}" -c "${cookiePath}" "https://drive.usercontent.google.com/download?id=${fileId}&export=download" -o "${filePath}"
-
-            # Check if it is HTML (Virus Warning)
-            if file -b --mime-type "${filePath}" | grep -q "text/html"; then
-                echo "Direct download received HTML (likely warning). Switching to Confirm Token Strategy..."
-                
-                # Strategy 2: Get Confirm Token from generic UC URL
-                # 1. Fetch warning page to get token
-                CONFIRM_TOKEN=$(curl -sL -c "${cookiePath}" "https://drive.google.com/uc?export=download&id=${fileId}" | grep -oE 'confirm=[a-zA-Z0-9_]+' | head -n 1 | cut -d '=' -f 2)
-                
-                if [ -z "$CONFIRM_TOKEN" ]; then
-                    # Fallback token
-                    echo "No token found. Using default 't'..."
-                    CONFIRM_TOKEN="t"
-                fi
-
-                # 2. Download with confirm token
-                echo "Downloading with confirm token: $CONFIRM_TOKEN"
-                curl -L -b "${cookiePath}" "https://drive.google.com/uc?export=download&confirm=$CONFIRM_TOKEN&id=${fileId}" -o "${filePath}"
-            fi
-
-            # Cleanup
-            rm -f "${cookiePath}"
-        `;
+        console.log(`Starting Download via Script for File ID: ${fileId}...`);
 
         return new Promise((resolve, reject) => {
-            const process = spawn('bash', ['-c', command]);
+            const process = spawn('bash', [scriptPath, fileId, filePath]);
 
-            // Log stderr (curl progress/errors)
-            process.stderr.on('data', (data) => console.log(`[Curl]: ${data.toString()}`));
+            // Log stderr/stdout for debug
+            process.stdout.on('data', (data) => console.log(`[Script]: ${data.toString().trim()}`));
+            process.stderr.on('data', (data) => console.log(`[Script Error]: ${data.toString().trim()}`));
 
             process.on('close', (code) => {
                 if (code !== 0) {
-                    reject(new Error(`Shell download failed with code ${code}`));
+                    reject(new Error(`Download script failed with code ${code}`));
                 } else {
                     if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
-                        // Double check it's not HTML error
-                        try {
-                            const mimeCheck = spawn('file', ['--mime-type', '-b', filePath]);
-                            let mimeType = '';
-                            mimeCheck.stdout.on('data', (d) => mimeType += d.toString().trim());
-                            mimeCheck.on('close', () => {
-                                if (mimeType.includes('text/html')) {
-                                    const content = fs.readFileSync(filePath, 'utf8').slice(0, 200);
-                                    fs.unlinkSync(filePath);
-                                    reject(new Error(`Download resulted in HTML (likely error): ${content}`));
-                                } else {
-                                    console.log(`Download success: ${filePath}`);
-                                    resolve(filePath);
-                                }
-                            });
-                        } catch (e) {
-                            // Fallback if 'file' command missing
-                            resolve(filePath);
-                        }
+                        console.log(`Download success: ${filePath}`);
+                        resolve(filePath);
                     } else {
-                        reject(new Error('Download resulted in empty file'));
+                        reject(new Error('Download script finished but file is missing or empty.'));
                     }
                 }
             });
