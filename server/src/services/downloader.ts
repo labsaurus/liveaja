@@ -71,10 +71,29 @@ export class DownloaderService {
                         const stats = fs.statSync(filePath);
                         if (stats.size === 0) {
                             reject(new Error('Download resulted in empty file. Check File ID/Permissions.'));
-                        } else {
-                            console.log(`Download success: ${filePath} (${stats.size} bytes)`);
-                            resolve(filePath);
+                            return;
                         }
+
+                        // Verify MIME type using 'file' command
+                        const mimeCheck = spawn('file', ['--mime-type', '-b', filePath]);
+                        let mimeType = '';
+                        mimeCheck.stdout.on('data', (d) => mimeType += d.toString().trim());
+
+                        mimeCheck.on('close', (mimeCode) => {
+                            if (mimeType.includes('text/html') || mimeType.includes('text/plain')) {
+                                // It's likely an error page saved as .mp4
+                                console.error(`Download failed validation. MIME: ${mimeType}`);
+                                // Try to read first few lines to see error
+                                const content = fs.readFileSync(filePath, 'utf8').slice(0, 500);
+                                console.error('File content preview:', content);
+
+                                fs.unlinkSync(filePath);
+                                reject(new Error(`Download failed. file is HTML/Text (likely error page), not video. Content: ${content.slice(0, 100)}...`));
+                            } else {
+                                console.log(`Download success: ${filePath} (${stats.size} bytes, Type: ${mimeType})`);
+                                resolve(filePath);
+                            }
+                        });
                     } else {
                         reject(new Error(`Curl download failed with code ${code2}`));
                     }
