@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
 import './App.css';
-import { type Channel, getChannels, createChannel, startStream, stopStream, importVideo, deleteChannel, getLogs } from './api';
+import { type Channel, getChannels, createChannel, startStream, stopStream, importVideo, deleteChannel, getLogs, updateChannel } from './api';
 
 function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [importTargetId, setImportTargetId] = useState<number | null>(null);
   const [logViewerTargetId, setLogViewerTargetId] = useState<number | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<Channel | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const logsInterval = useRef<any>(null);
 

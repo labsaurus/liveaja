@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { initDB } from './db';
 import channelsRouter from './routes/channels';
+import './services/scheduler'; // Start scheduler side-effect
 
 dotenv.config();
 
