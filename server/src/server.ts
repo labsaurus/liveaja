@@ -6,12 +6,13 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { initDB } from './db';
 import channelsRouter from './routes/channels';
-import './services/scheduler'; // Start scheduler side-effect
+import { startScheduler } from './services/scheduler'; // Import startScheduler
 
 dotenv.config();
 
 // Initialize Database
 initDB();
+startScheduler(); // Call startScheduler
 
 const app = express();
 const server = http.createServer(app);

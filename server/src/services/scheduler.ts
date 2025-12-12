@@ -10,41 +10,51 @@ export class SchedulerService {
   }
 
   checkSchedules() {
-    const channels = db.prepare('SELECT * FROM channels WHERE schedule_start_time IS NOT NULL AND schedule_stop_time IS NOT NULL').all() as any[];
-    
-    const now = new Date();
-    const currentHHMM = now.toTimeString().slice(0, 5); // "14:30"
+    try {
+      const channels = db.prepare('SELECT * FROM channels WHERE schedule_start_time IS NOT NULL AND schedule_stop_time IS NOT NULL').all() as any[];
 
-    for (const channel of channels) {
-      if (!channel.video_source_path || channel.download_status !== 'READY') continue;
+      const now = new Date();
+      const currentHHMM = now.toTimeString().slice(0, 5); // "14:30"
 
-      const { id, name, is_active, schedule_start_time, schedule_stop_time } = channel;
-      
-      const shouldBeRunning = this.isTimeInRange(currentHHMM, schedule_start_time, schedule_stop_time);
+      for (const channel of channels) {
+        if (!channel.video_source_path || channel.download_status !== 'READY') continue;
 
-      if (shouldBeRunning && !is_active) {
-        console.log(`[Scheduler] Starting channel ${name} (${id}) at ${currentHHMM}`);
-        try {
+        const { id, name, is_active, schedule_start_time, schedule_stop_time } = channel;
+
+        const shouldBeRunning = this.isTimeInRange(currentHHMM, schedule_start_time, schedule_stop_time);
+
+        if (shouldBeRunning && !is_active) {
+          console.log(`[Scheduler] Starting channel ${name} (${id}) at ${currentHHMM}`);
+          try {
             streamManager.startStream(id);
-        } catch (e) { console.error(`[Scheduler] Failed to start ${name}:`, e); }
-      } else if (!shouldBeRunning && is_active) {
-        console.log(`[Scheduler] Stopping channel ${name} (${id}) at ${currentHHMM}`);
-        try {
+          } catch (e) { console.error(`[Scheduler] Failed to start ${name}:`, e); }
+        } else if (!shouldBeRunning && is_active) {
+          console.log(`[Scheduler] Stopping channel ${name} (${id}) at ${currentHHMM}`);
+          try {
             streamManager.stopStream(id);
-        } catch (e) { console.error(`[Scheduler] Failed to stop ${name}:`, e); }
+          } catch (e) { console.error(`[Scheduler] Failed to stop ${name}:`, e); }
+        }
       }
+    } catch (e: any) {
+      if (e.message.includes('no such table')) return; // DB not ready
+      console.error('[Scheduler Error]', e);
     }
   }
 
   isTimeInRange(current: string, start: string, end: string): boolean {
     if (start < end) {
-        // e.g. 08:00 to 17:00
-        return current >= start && current < end;
+      // e.g. 08:00 to 17:00
+      return current >= start && current < end;
     } else {
-        // e.g. 22:00 to 06:00 (Overnight)
-        return current >= start || current < end;
+      // e.g. 22:00 to 06:00 (Overnight)
+      return current >= start || current < end;
     }
   }
 }
 
 export const scheduler = new SchedulerService();
+
+export const startScheduler = () => {
+  scheduler.checkSchedules(); // Initial check
+  console.log('Scheduler service started');
+};
