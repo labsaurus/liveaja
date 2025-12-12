@@ -26,13 +26,19 @@ export class DownloaderService {
             // We output to a temp file 'response_phase1' to analyze it.
             const phase1File = path.join(STORAGE_DIR, `phase1_${Date.now()}`);
 
-            console.log('Phase 1: Fetching initial URL to check for warning/cookie...');
+            console.log('Phase 1: Fetching using User Content URL...');
+            // User suggests: https://drive.usercontent.google.com/download?id=ID&export=download
+            const userContentUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
+            // Added &confirm=t just in case it helps, but user used without. 
+            // Let's stick to user's exact URL but keep cookies enabled.
+            const targetUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
+
             const phase1 = spawn('curl', [
                 '-s', // Silent
                 '-c', cookiePath, // Save jar
                 '-L', // Follow redirects
                 '-o', phase1File, // Output to temp file
-                `https://drive.google.com/uc?export=download&id=${fileId}`
+                targetUrl
             ]);
 
             phase1.on('close', (code) => {
