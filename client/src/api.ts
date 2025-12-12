@@ -7,6 +7,8 @@ export interface Channel {
     rtmp_key: string;
     video_source_path: string | null;
     looping_enabled: number;
+    schedule_start_time: string | null;
+    schedule_stop_time: string | null;
     download_status: 'IDLE' | 'DOWNLOADING' | 'READY' | 'ERROR';
     last_error: string | null;
     is_active: number;
@@ -52,5 +54,10 @@ export const importVideo = async (id: number, url: string) => {
 
 export const getLogs = async (id: number) => {
     const res = await api.get<string[]>(`/channels/${id}/logs`);
+    return res.data;
+};
+
+export const updateChannel = async (id: number, data: Partial<Channel>) => {
+    const res = await api.put(`/channels/${id}`, data);
     return res.data;
 };

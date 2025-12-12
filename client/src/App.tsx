@@ -11,6 +11,26 @@ function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const logsInterval = useRef<any>(null);
 
+  // Poll logs when viewer is open
+  useEffect(() => {
+    if (logViewerTargetId) {
+      const fetchLogs = async () => {
+        try {
+          const data = await getLogs(logViewerTargetId);
+          setLogs(data);
+        } catch (e) { console.error(e); }
+      };
+      fetchLogs();
+      logsInterval.current = setInterval(fetchLogs, 2000);
+    } else {
+      setLogs([]);
+      if (logsInterval.current) clearInterval(logsInterval.current);
+    }
+    return () => {
+      if (logsInterval.current) clearInterval(logsInterval.current);
+    };
+  }, [logViewerTargetId]);
+
   // Poll for updates
   useEffect(() => {
     fetchChannels();
@@ -100,6 +120,12 @@ function App() {
                 </button>
               )}
 
+              <button className="btn" onClick={() => setLogViewerTargetId(channel.id)}>
+                Logs
+              </button>
+              <button className="btn" onClick={() => setScheduleTarget(channel)}>
+                Schedule
+              </button>
               <button className="btn" onClick={() => setImportTargetId(channel.id)}>
                 Import
               </button>
@@ -107,6 +133,12 @@ function App() {
                 Delete
               </button>
             </div>
+            {/* Mini Schedule Badge */}
+            {(channel.schedule_start_time && channel.schedule_stop_time) && (
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', padding: '0 1.5rem 1rem' }}>
+                🕒 Runs: {channel.schedule_start_time} - {channel.schedule_stop_time}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -133,6 +165,69 @@ function App() {
                 <button type="submit" className="btn btn-primary">Create</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Schedule Modal */}
+      {scheduleTarget && (
+        <div className="modal-overlay" onClick={() => setScheduleTarget(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>Schedule Stream: {scheduleTarget.name}</h2>
+            <p style={{ marginBottom: '1rem', color: '#94a3b8' }}>
+              Stream will automatically START and STOP within this time range (Server Time).
+              Leave empty to disable.
+            </p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target as HTMLFormElement);
+              await updateChannel(scheduleTarget.id, {
+                schedule_start_time: formData.get('start') as string || null,
+                schedule_stop_time: formData.get('stop') as string || null
+              });
+              setScheduleTarget(null);
+              fetchChannels();
+            }}>
+              <div className="form-group">
+                <label>Start Time (HH:MM)</label>
+                <input name="start" type="time" defaultValue={scheduleTarget.schedule_start_time || ''} />
+              </div>
+              <div className="form-group">
+                <label>Stop Time (HH:MM)</label>
+                <input name="stop" type="time" defaultValue={scheduleTarget.schedule_stop_time || ''} />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn" onClick={() => setScheduleTarget(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Save Schedule</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Log Viewer Modal */}
+      {logViewerTargetId && (
+        <div className="modal-overlay" onClick={() => setLogViewerTargetId(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px' }}>
+            <h2>Stream Logs</h2>
+            <div style={{
+              background: '#000',
+              color: '#0f0',
+              padding: '1rem',
+              borderRadius: '0.5rem',
+              height: '400px',
+              overflowY: 'auto',
+              fontFamily: 'monospace',
+              fontSize: '0.85rem'
+            }}>
+              {logs.length === 0 ? <p style={{ color: '#666' }}>No logs yet...</p> :
+                logs.map((line, i) => <div key={i}>{line}</div>)
+              }
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button className="btn" onClick={() => setLogViewerTargetId(null)}>Close</button>
+            </div>
           </div>
         </div>
       )}
