@@ -23,79 +23,123 @@ export class DownloaderService {
         return new Promise((resolve, reject) => {
             // Step 1: Request to get cookie and potentially check for confirm token
             // We use curl to fetch the page content and save cookies
+            // We output to a temp file 'response_phase1' to analyze it.
+            const phase1File = path.join(STORAGE_DIR, `phase1_${Date.now()}`);
+
+            console.log('Phase 1: Fetching initial URL to check for warning/cookie...');
             const phase1 = spawn('curl', [
                 '-s', // Silent
                 '-c', cookiePath, // Save jar
                 '-L', // Follow redirects
+                '-o', phase1File, // Output to temp file
                 `https://drive.google.com/uc?export=download&id=${fileId}`
             ]);
 
-            let outputData = '';
-            phase1.stdout.on('data', (data) => { outputData += data.toString(); });
-
             phase1.on('close', (code) => {
                 if (code !== 0) {
+                    if (fs.existsSync(phase1File)) fs.unlinkSync(phase1File);
                     return reject(new Error('Curl phase 1 failed'));
                 }
 
-                // Step 2: Check for 'confirm' token in the output
-                // HTML response might contain: href="/uc?export=download&id=xxx&confirm=yyy"
-                const confirmMatch = outputData.match(/confirm=([a-zA-Z0-9_-]+)/);
-                const confirmToken = confirmMatch ? confirmMatch[1] : null;
+                // Read content of phase1File to check for "confirm=" or if it is already the binary
+                // To be safe for large binary, we should read only first 4KB? 
+                // But if it IS the full binary, reading it all into memory is bad.
+                // Let's use 'file' command to check what phase1File is.
 
-                let finalUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-                if (confirmToken) {
-                    console.log(`GDrive Large File detected. Confirm token found: ${confirmToken}`);
-                    finalUrl += `&confirm=${confirmToken}`;
-                }
+                const mimeCheck = spawn('file', ['--mime-type', '-b', phase1File]);
+                let mimeType = '';
+                mimeCheck.stdout.on('data', (d) => mimeType += d.toString().trim());
 
-                console.log(`Phase 2: Downloading binary...`);
+                mimeCheck.on('close', (mimeCode) => {
+                    if (mimeCode !== 0) {
+                        if (fs.existsSync(phase1File)) fs.unlinkSync(phase1File);
+                        if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+                        return reject(new Error(`Failed to determine MIME type of phase1File.`));
+                    }
 
-                // Step 3: Download binary using the cookie
-                const phase2 = spawn('curl', [
-                    '-L',
-                    '-b', cookiePath, // Load cookies
-                    '-o', filePath,
-                    finalUrl
-                ]);
-
-                // Optional: Pipe progress to console?
-                // phase2.stderr.pipe(process.stderr);
-
-                phase2.on('close', (code2) => {
-                    // Cleanup cookie
-                    if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
-
-                    if (code2 === 0) {
-                        // Verify file size > 0
+                    // CASE A: It is confirmed Video (Small file) or other binary
+                    if (mimeType.includes('video/') || mimeType.includes('application/octet-stream') || mimeType.includes('audio/')) {
+                        console.log('Phase 1 downloaded the file directly (Small file).');
+                        fs.renameSync(phase1File, filePath);
+                        // Check size
                         const stats = fs.statSync(filePath);
                         if (stats.size === 0) {
-                            reject(new Error('Download resulted in empty file. Check File ID/Permissions.'));
-                            return;
+                            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                            if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+                            return reject(new Error('Phase 1 download resulted in empty file. Check File ID/Permissions.'));
                         }
+                        console.log(`Download success: ${filePath} (${stats.size} bytes, Type: ${mimeType})`);
+                        if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+                        resolve(filePath);
+                        return;
+                    }
 
-                        // Verify MIME type using 'file' command
-                        const mimeCheck = spawn('file', ['--mime-type', '-b', filePath]);
-                        let mimeType = '';
-                        mimeCheck.stdout.on('data', (d) => mimeType += d.toString().trim());
+                    // CASE B: It is HTML (likely warning) or text
+                    // Search for confirm token
+                    // Read file content safely (it's text)
+                    let htmlContent = '';
+                    try {
+                        htmlContent = fs.readFileSync(phase1File, 'utf8');
+                    } catch (readErr: any) {
+                        if (fs.existsSync(phase1File)) fs.unlinkSync(phase1File);
+                        if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+                        return reject(new Error(`Could not read phase1File content: ${readErr.message}`));
+                    }
 
-                        mimeCheck.on('close', (mimeCode) => {
-                            if (mimeType.includes('text/html') || mimeType.includes('text/plain')) {
-                                // It's likely an error page saved as .mp4
-                                console.error(`Download failed validation. MIME: ${mimeType}`);
-                                // Try to read first few lines to see error
-                                const content = fs.readFileSync(filePath, 'utf8').slice(0, 500);
-                                console.error('File content preview:', content);
+                    const confirmMatch = htmlContent.match(/confirm=([a-zA-Z0-9_-]+)/);
+                    const confirmToken = confirmMatch ? confirmMatch[1] : null;
 
-                                fs.unlinkSync(filePath);
-                                reject(new Error(`Download failed. file is HTML/Text (likely error page), not video. Content: ${content.slice(0, 100)}...`));
+                    if (confirmToken) {
+                        console.log(`GDrive Large File detected. Confirm token found: ${confirmToken}`);
+                        const finalUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=${confirmToken}`;
+
+                        console.log(`Phase 2: Downloading binary with confirm token...`);
+                        const phase2 = spawn('curl', [
+                            '-L',
+                            '-b', cookiePath, // Load cookies
+                            '-o', filePath,
+                            finalUrl
+                        ]);
+
+                        phase2.on('close', (code2) => {
+                            if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+                            if (fs.existsSync(phase1File)) fs.unlinkSync(phase1File); // Clean temp
+
+                            if (code2 === 0) {
+                                // Final Validation
+                                const stats = fs.statSync(filePath);
+                                if (stats.size === 0) {
+                                    reject(new Error('Phase 2 download resulted in empty file. Check File ID/Permissions.'));
+                                } else {
+                                    // Verify MIME again to be sure
+                                    const finalMimeCheck = spawn('file', ['--mime-type', '-b', filePath]);
+                                    let finalMimeType = '';
+                                    finalMimeCheck.stdout.on('data', (d) => finalMimeType += d.toString().trim());
+
+                                    finalMimeCheck.on('close', (finalMimeCode) => {
+                                        if (finalMimeCode !== 0 || finalMimeType.includes('text/html') || finalMimeType.includes('text/plain')) {
+                                            console.error(`Download failed validation. Final MIME: ${finalMimeType}`);
+                                            const contentPreview = fs.readFileSync(filePath, 'utf8').slice(0, 500);
+                                            console.error('File content preview:', contentPreview);
+                                            fs.unlinkSync(filePath);
+                                            reject(new Error(`Download failed. Final file is HTML/Text (likely error page), not expected binary. Content: ${contentPreview.slice(0, 100)}...`));
+                                        } else {
+                                            console.log(`Download success: ${filePath} (${stats.size} bytes, Type: ${finalMimeType})`);
+                                            resolve(filePath);
+                                        }
+                                    });
+                                }
                             } else {
-                                console.log(`Download success: ${filePath} (${stats.size} bytes, Type: ${mimeType})`);
-                                resolve(filePath);
+                                reject(new Error(`Phase 2 curl failed with code ${code2}`));
                             }
                         });
+
                     } else {
-                        reject(new Error(`Curl download failed with code ${code2}`));
+                        // HTML but no confirm token?
+                        console.error('Phase 1 returned HTML but no confirm token found.');
+                        if (fs.existsSync(phase1File)) fs.unlinkSync(phase1File);
+                        if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+                        reject(new Error(`Download failed. GDrive returned HTML (${mimeType}) but no confirm token. Check if file is Public or if the ID is correct.`));
                     }
                 });
             });
