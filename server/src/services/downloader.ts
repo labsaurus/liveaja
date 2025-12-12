@@ -26,12 +26,10 @@ export class DownloaderService {
             // We output to a temp file 'response_phase1' to analyze it.
             const phase1File = path.join(STORAGE_DIR, `phase1_${Date.now()}`);
 
-            console.log('Phase 1: Fetching using User Content URL...');
-            // User suggests: https://drive.usercontent.google.com/download?id=ID&export=download
-            const userContentUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
-            // Added &confirm=t just in case it helps, but user used without. 
-            // Let's stick to user's exact URL but keep cookies enabled.
-            const targetUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
+            console.log('Phase 1: Fetching initial URL to check for warning/cookie...');
+            // We use the canonical "Export" URL which typically redirects to the warning page 
+            // with a properly formatted link containing the confirm token.
+            const targetUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
 
             const phase1 = spawn('curl', [
                 '-s', // Silent
@@ -92,11 +90,16 @@ export class DownloaderService {
                         return reject(new Error(`Could not read phase1File content: ${readErr.message}`));
                     }
 
-                    const confirmMatch = htmlContent.match(/confirm=([a-zA-Z0-9_-]+)/);
-                    const confirmToken = confirmMatch ? confirmMatch[1] : null;
+                    const confirmMatch = htmlContent.match(/confirm=([^&"]+)/);
+                    let confirmToken = confirmMatch ? confirmMatch[1] : null;
+
+                    if (!confirmToken) {
+                        console.warn('Phase 1 HTML detected but no confirm token regex match. Trying default "t"...');
+                        confirmToken = 't';
+                    }
 
                     if (confirmToken) {
-                        console.log(`GDrive Large File detected. Confirm token found: ${confirmToken}`);
+                        console.log(`GDrive Large File detected. Confirm token found/used: ${confirmToken}`);
                         const finalUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=${confirmToken}`;
 
                         console.log(`Phase 2: Downloading binary with confirm token...`);
